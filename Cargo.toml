@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["crates/bc-scsi", "crates/bc-drive", "crates/bc-fs", "crates/bc-burn", "crates/bc-cli", "crates/bc-gui"]
+default-members = ["crates/bc-gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/theoddprince/bitflare"
+
+[workspace.dependencies]
+bc-scsi = { path = "crates/bc-scsi" }
+bc-drive = { path = "crates/bc-drive" }
+bc-fs = { path = "crates/bc-fs" }
+bc-burn = { path = "crates/bc-burn" }
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"

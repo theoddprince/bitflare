@@ -1,0 +1,560 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct Column {
+    title: string,
+    stretch: float,
+}
+
+// The rotation lives on an inner Image: a rotation bound on the root of a component that
+// inherits Image is evaluated once and never re-rendered as animation-tick() advances.
+export component Spinner inherits Rectangle {
+    in property <color> tint: Theme.accent;
+    width: 16px;
+    height: 16px;
+    Image {
+        source: @image-url("icons/loader.svg");
+        colorize: root.tint;
+        width: parent.width;
+        height: parent.height;
+        transform-rotation: Math.mod(animation-tick() / 1ms, 900) / 900 * 360deg;
+    }
+}
+
+// kind: "primary" | "secondary" | "ghost" | "chrome"
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <string> kind: "secondary";
+    in property <bool> enabled: true;
+    in property <string> tooltip;
+    callback clicked;
+
+    property <bool> primary: root.kind == "primary";
+    property <bool> chrome: root.kind == "chrome";
+    property <color> fg: !root.enabled ? (root.primary ? #ffffffb3 : root.chrome ? Theme.on-ink-3 : Theme.text-3)
+        : root.primary ? #ffffff : root.chrome ? Theme.on-ink : Theme.text;
+
+    height: 34px;
+    min-width: max(34px, content.min-width);
+    preferred-width: content.preferred-width;
+    border-radius: 7px;
+    background: root.primary ? (!root.enabled ? Theme.accent.with-alpha(0.4) : touch.pressed ? Theme.accent-press : touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : root.chrome ? (!root.enabled ? transparent : touch.pressed ? #ffffff24 : touch.has-hover ? #ffffff17 : #ffffff0b)
+        : root.kind == "ghost" ? (touch.pressed && root.enabled ? Theme.press : touch.has-hover && root.enabled ? Theme.hover : transparent)
+        : (!root.enabled ? Theme.surface-2 : touch.pressed ? Theme.press : touch.has-hover ? Theme.hover : Theme.surface);
+    border-width: root.primary || root.kind == "ghost" ? 0px : 1px;
+    border-color: root.chrome ? #ffffff1f : Theme.border-strong;
+    // Only primary buttons get a glow; a zero-blur shadow would still show through
+    // the translucent backgrounds of the other kinds.
+    drop-shadow-blur: 6px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: root.primary && root.enabled ? Theme.accent.with-alpha(0.35) : transparent;
+    animate background { duration: 120ms; }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    content := HorizontalLayout {
+        padding-left: root.text == "" ? 9px : 14px;
+        padding-right: root.text == "" ? 9px : 15px;
+        spacing: 7px;
+        alignment: center;
+        if root.icon.width > 0: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                colorize: root.fg;
+                width: 16px;
+                height: 16px;
+            }
+        }
+        if root.text != "": Text {
+            text: root.text;
+            color: root.fg;
+            font-size: 13px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component CheckBox inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled;
+
+    height: 26px;
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                background: root.checked ? Theme.accent : Theme.surface;
+                border-width: root.checked ? 0px : 1.5px;
+                border-color: touch.has-hover ? Theme.accent : Theme.border-strong;
+                animate background { duration: 120ms; }
+                if root.checked: Image {
+                    source: @image-url("icons/check.svg");
+                    colorize: white;
+                    width: 13px;
+                    height: 13px;
+                }
+            }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 13px;
+            color: root.enabled ? Theme.text : Theme.text-3;
+        }
+    }
+}
+
+export component ComboBox inherits Rectangle {
+    in property <[string]> model;
+    in-out property <int> current-index: 0;
+    in property <bool> enabled: true;
+    in property <bool> on-dark: false;
+    in property <image> icon;
+    callback selected(int);
+
+    height: 34px;
+    border-radius: 7px;
+    background: root.on-dark ? (touch.has-hover && root.enabled ? #ffffff17 : #ffffff0b) : (root.enabled ? Theme.surface : Theme.surface-2);
+    border-width: 1px;
+    border-color: root.on-dark ? #ffffff1f : touch.has-hover && root.enabled ? Theme.accent : Theme.border-strong;
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            popup.show();
+        }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 9px;
+        if root.icon.width > 0: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 16px;
+                height: 16px;
+                colorize: root.on-dark ? Theme.accent : Theme.text-2;
+            }
+        }
+        Text {
+            text: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : "";
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            font-size: 13px;
+            color: !root.enabled ? (root.on-dark ? Theme.on-ink-3 : Theme.text-3) : root.on-dark ? Theme.on-ink : Theme.text;
+        }
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("icons/chevron-down.svg");
+                colorize: root.on-dark ? Theme.on-ink-2 : Theme.text-2;
+                width: 14px;
+                height: 14px;
+            }
+        }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.border;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: #00000030;
+            VerticalLayout {
+                padding: 4px;
+                for item[i] in root.model: Rectangle {
+                    height: 32px;
+                    border-radius: 5px;
+                    background: i == root.current-index ? Theme.accent-soft : item-touch.has-hover ? Theme.hover : transparent;
+                    item-touch := TouchArea {
+                        clicked => {
+                            root.current-index = i;
+                            root.selected(i);
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        Text {
+                            text: item;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            font-size: 13px;
+                            font-weight: i == root.current-index ? 600 : 400;
+                            color: i == root.current-index ? Theme.accent-text : Theme.text;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component LineEdit inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+
+    height: 34px;
+    border-radius: 7px;
+    background: Theme.surface;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border-strong;
+
+    input := TextInput {
+        x: 12px;
+        width: parent.width - 24px;
+        height: 100%;
+        vertical-alignment: center;
+        text <=> root.text;
+        single-line: true;
+        font-size: 13px;
+        color: Theme.text;
+        selection-background-color: Theme.accent.with-alpha(0.3);
+    }
+    if root.text == "": Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: 100%;
+        vertical-alignment: center;
+        text: root.placeholder;
+        font-size: 13px;
+        color: Theme.text-3;
+    }
+}
+
+export component Table inherits Rectangle {
+    in property <[Column]> columns;
+    in property <[[string]]> rows;
+    in-out property <int> current-row: -1;
+    in property <bool> selectable: true;
+    in property <string> empty-text;
+    in property <image> empty-icon;
+    callback row-selected(int);
+
+    property <length> inner: root.width - 28px - (root.columns.length - 1) * 12px;
+
+    background: Theme.surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+
+    VerticalLayout {
+        Rectangle {
+            height: 38px;
+            background: Theme.surface-2;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 12px;
+                for c in root.columns: Text {
+                    text: c.title;
+                    width: root.inner * c.stretch;
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                    color: Theme.text-2;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border;
+            }
+        }
+        ListView {
+            vertical-stretch: 1;
+            for row[i] in root.rows: Rectangle {
+                height: 36px;
+                background: i == root.current-row && root.selectable ? Theme.accent-soft : row-touch.has-hover && root.selectable ? Theme.hover : Math.mod(i, 2) == 1 ? Theme.surface-2 : transparent;
+                row-touch := TouchArea {
+                    enabled: root.selectable;
+                    clicked => {
+                        root.current-row = i;
+                        root.row-selected(i);
+                    }
+                }
+                if i == root.current-row && root.selectable: Rectangle {
+                    x: 0;
+                    width: 3px;
+                    background: Theme.accent;
+                }
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 12px;
+                    for cell[j] in row: Text {
+                        text: cell;
+                        width: root.inner * root.columns[j].stretch;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        font-size: 12px;
+                        font-weight: j == 0 ? 500 : 400;
+                        color: j == 0 ? Theme.text : Theme.text-2;
+                    }
+                }
+            }
+        }
+    }
+    if root.rows.length == 0: VerticalLayout {
+        y: 38px;
+        height: parent.height - 38px;
+        alignment: center;
+        spacing: 10px;
+        if root.empty-icon.width > 0: HorizontalLayout {
+            alignment: center;
+            Image {
+                source: root.empty-icon;
+                width: 34px;
+                height: 34px;
+                colorize: Theme.border-strong;
+            }
+        }
+        Text {
+            text: root.empty-text;
+            horizontal-alignment: center;
+            font-size: 13px;
+            color: Theme.text-3;
+        }
+    }
+}
+
+export component Card inherits Rectangle {
+    in property <string> title;
+    in property <image> icon;
+
+    background: Theme.surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 9px;
+            alignment: start;
+            vertical-stretch: 0;
+            if root.icon.width > 0: VerticalLayout {
+                alignment: center;
+                Image {
+                    source: root.icon;
+                    width: 17px;
+                    height: 17px;
+                    colorize: Theme.accent;
+                }
+            }
+            Text {
+                text: root.title;
+                font-size: 14px;
+                font-weight: 700;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+        }
+        @children
+    }
+}
+
+export component KeyValue inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> value;
+    in property <length> key-width: 150px;
+    spacing: 12px;
+    Text {
+        text: root.key;
+        width: root.key-width;
+        font-size: 12px;
+        color: Theme.text-2;
+    }
+    Text {
+        text: root.value;
+        horizontal-stretch: 1;
+        font-size: 12px;
+        wrap: word-wrap;
+        color: Theme.text;
+    }
+}
+
+export component ProgressBar inherits Rectangle {
+    in property <float> value;
+    // "accent" | "success" | "danger"
+    in property <string> tone: "accent";
+    height: 10px;
+    border-radius: self.height / 2;
+    background: Theme.press;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width * max(0.0, min(root.value, 1.0));
+        border-radius: parent.border-radius;
+        background: root.tone == "danger" ? Theme.danger-gradient : root.tone == "success" ? Theme.success-gradient : Theme.accent-gradient;
+        animate width { duration: 250ms; easing: ease-out; }
+    }
+}
+
+export component PageHeader inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <image> icon;
+    spacing: 14px;
+    alignment: start;
+    Rectangle {
+        width: 44px;
+        height: 44px;
+        border-radius: 11px;
+        background: Theme.accent-soft;
+        Image {
+            source: root.icon;
+            width: 22px;
+            height: 22px;
+            colorize: Theme.accent;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Text {
+            text: root.title;
+            font-size: 21px;
+            font-weight: 700;
+            color: Theme.text;
+        }
+        Text {
+            text: root.subtitle;
+            font-size: 12px;
+            color: Theme.text-2;
+        }
+    }
+}
+
+export component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <string> subtitle;
+    in property <image> icon;
+    in property <bool> selected;
+    callback clicked;
+
+    height: 50px;
+    border-radius: 8px;
+    background: root.selected ? Theme.ink-raised : touch.has-hover ? #ffffff0a : transparent;
+    animate background { duration: 120ms; }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+    Rectangle {
+        x: 0;
+        width: 3px;
+        height: 56%;
+        border-radius: 2px;
+        background: root.selected ? Theme.accent : transparent;
+    }
+    HorizontalLayout {
+        padding-left: 15px;
+        padding-right: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 19px;
+                height: 19px;
+                colorize: root.selected ? Theme.accent : Theme.on-ink-2;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            Text {
+                text: root.text;
+                font-size: 13px;
+                font-weight: root.selected ? 700 : 500;
+                color: root.selected ? Theme.on-ink : Theme.on-ink-2;
+            }
+            Text {
+                text: root.subtitle;
+                font-size: 11px;
+                overflow: elide;
+                color: Theme.on-ink-3;
+            }
+        }
+    }
+}
+
+export component SectionLabel inherits Text {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: Theme.on-ink-3;
+}
+
+// tone: "info" | "warn" | "success" | "danger"
+export component Banner inherits Rectangle {
+    in property <string> text;
+    in property <string> tone: "info";
+    property <color> fg: root.tone == "success" ? Theme.success : root.tone == "danger" ? Theme.danger : root.tone == "warn" ? #a5680a : Theme.accent-text;
+    border-radius: 8px;
+    background: root.tone == "success" ? Theme.success-soft : root.tone == "danger" ? Theme.danger-soft : root.tone == "warn" ? Theme.warn-soft : Theme.accent-soft;
+    min-height: layout.preferred-height;
+    layout := HorizontalLayout {
+        padding: 12px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: start;
+            Image {
+                source: root.tone == "success" ? @image-url("icons/check-circle.svg") : root.tone == "info" ? @image-url("icons/info.svg") : @image-url("icons/alert.svg");
+                width: 17px;
+                height: 17px;
+                colorize: root.fg;
+            }
+        }
+        Text {
+            text: root.text;
+            horizontal-stretch: 1;
+            wrap: word-wrap;
+            font-size: 12px;
+            font-weight: 500;
+            color: root.tone == "info" || root.tone == "warn" ? Theme.text : root.fg;
+            vertical-alignment: center;
+        }
+    }
+}

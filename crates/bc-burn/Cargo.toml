@@ -1,0 +1,11 @@
+[package]
+name = "bc-burn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bc-scsi.workspace = true
+bc-drive.workspace = true
+bc-fs.workspace = true
+thiserror.workspace = true

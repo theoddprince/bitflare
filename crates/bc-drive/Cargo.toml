@@ -1,0 +1,9 @@
+[package]
+name = "bc-drive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bc-scsi.workspace = true
+thiserror.workspace = true

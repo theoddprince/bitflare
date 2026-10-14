@@ -1,0 +1,968 @@
+import { Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import {
+    Banner, Button, Card, CheckBox, Column, ComboBox, KeyValue, LineEdit, NavItem, PageHeader,
+    ProgressBar, SectionLabel, Spinner, Table,
+} from "widgets.slint";
+
+export { Theme }
+
+export struct InfoRow {
+    key: string,
+    value: string,
+}
+
+component PlannedPage inherits VerticalLayout {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <image> icon;
+    in property <[string]> features;
+    in property <string> milestone;
+
+    padding: 28px;
+    spacing: 18px;
+    alignment: start;
+
+    PageHeader {
+        title: root.title;
+        subtitle: root.subtitle;
+        icon: root.icon;
+    }
+    Card {
+        title: "What this module does";
+        icon: @image-url("icons/sparkle.svg");
+        for f in root.features: HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                alignment: start;
+                padding-top: 1px;
+                Image {
+                    source: @image-url("icons/check.svg");
+                    width: 15px;
+                    height: 15px;
+                    colorize: Theme.accent;
+                }
+            }
+            Text {
+                text: f;
+                font-size: 13px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                color: Theme.text;
+            }
+        }
+    }
+    Banner {
+        tone: "info";
+        text: "In development — scheduled for " + root.milestone + ". The drive engine it builds on is already in place.";
+    }
+}
+
+component Overlay inherits Rectangle {
+    background: #0f0c0aa6;
+    TouchArea { }
+    @children
+}
+
+export component AppWindow inherits Window {
+    title: "Bitflare";
+    icon: @image-url("assets/icon-256.png");
+    preferred-width: 1220px;
+    preferred-height: 780px;
+    min-width: 1000px;
+    min-height: 640px;
+    background: Theme.page;
+    default-font-size: 13px;
+
+    in property <string> app-version: "0.1.0";
+
+    // Drive bar
+    in property <[string]> drive-names;
+    in-out property <int> drive-index: 0;
+    in property <bool> drive-ok;
+    in property <bool> busy;
+    in property <string> status-text: "Ready";
+    in property <string> disc-summary: "No disc";
+
+    // Info page
+    in property <[InfoRow]> drive-rows;
+    in property <[InfoRow]> disc-rows;
+    in property <[[string]]> track-rows;
+
+    // Data disc page
+    in property <[[string]]> data-rows;
+    in property <string> data-total-text: "0 bytes";
+    in property <string> data-capacity-text: "—";
+    in property <float> data-fill: 0;
+    in property <bool> data-over;
+    in property <string> burn-hint;
+    in-out property <string> volume-label: "NEW_DISC";
+    in-out property <int> fs-index: 0;
+    in-out property <int> media-index: 0;
+    in-out property <int> data-selected: -1;
+
+    in-out property <int> page: 1;
+
+    // Burn dialog
+    in property <bool> can-burn;
+    in-out property <bool> burn-dialog;
+    in property <[InfoRow]> burn-rows;
+    in property <[string]> burn-speeds;
+    in-out property <int> burn-speed-index;
+    in-out property <bool> burn-verify: true;
+    in-out property <bool> burn-finalize: true;
+
+    // Job progress window
+    in property <bool> job-visible;
+    in property <bool> job-running;
+    in property <bool> job-ok;
+    in property <bool> job-is-burn;
+    in property <bool> job-can-eject;
+    in property <string> job-title;
+    in property <string> job-phase;
+    in property <float> job-fraction;
+    in property <string> job-detail;
+    in property <[string]> job-log;
+    in property <string> job-result;
+    in property <string> job-copy-feedback;
+
+    callback refresh-drives();
+    callback drive-changed(int);
+    callback eject();
+    callback add-files();
+    callback add-folder();
+    callback remove-selected();
+    callback clear-data();
+    callback media-changed(int);
+    callback open-burn-dialog();
+    callback start-burn();
+    callback save-image();
+    callback cancel-job();
+    callback close-job();
+    callback eject-after-job();
+    callback copy-log();
+
+    init => {
+        Palette.color-scheme = ColorScheme.light;
+    }
+
+    VerticalLayout {
+        // ── Header ───────────────────────────────────────────────────────────
+        Rectangle {
+            height: 66px;
+            background: Theme.chrome;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 16px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("assets/wordmark-dark.png");
+                        height: 40px;
+                        width: self.height * self.source.width / self.source.height;
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 30px;
+                        border-radius: 15px;
+                        background: Theme.ink-raised;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 14px;
+                            spacing: 8px;
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    source: @image-url("icons/disc.svg");
+                                    width: 14px;
+                                    height: 14px;
+                                    colorize: Theme.gold;
+                                }
+                            }
+                            Text {
+                                text: root.disc-summary;
+                                vertical-alignment: center;
+                                font-size: 12px;
+                                color: Theme.on-ink-2;
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ComboBox {
+                        width: 320px;
+                        on-dark: true;
+                        icon: @image-url("icons/drive.svg");
+                        model: root.drive-names;
+                        current-index <=> root.drive-index;
+                        enabled: !root.busy && root.drive-names.length > 0;
+                        selected(i) => {
+                            root.drive-changed(i);
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Button {
+                        kind: "chrome";
+                        icon: @image-url("icons/refresh.svg");
+                        enabled: !root.busy;
+                        clicked => {
+                            root.refresh-drives();
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Button {
+                        kind: "chrome";
+                        text: "Eject";
+                        icon: @image-url("icons/eject.svg");
+                        enabled: root.drive-ok && !root.busy;
+                        clicked => {
+                            root.eject();
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                y: parent.height - 2px;
+                height: 2px;
+                background: @linear-gradient(90deg, Theme.accent 0%, Theme.gold 50%, Theme.chrome 100%);
+                opacity: 0.85;
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+
+            // ── Sidebar ──────────────────────────────────────────────────────
+            Rectangle {
+                width: 244px;
+                background: Theme.ink;
+                VerticalLayout {
+                    padding: 12px;
+                    padding-top: 18px;
+                    spacing: 3px;
+                    SectionLabel {
+                        text: "   CREATE";
+                    }
+                    NavItem {
+                        text: "Data Disc";
+                        subtitle: "Files and folders · UDF";
+                        icon: @image-url("icons/disc.svg");
+                        selected: root.page == 1;
+                        clicked => {
+                            root.page = 1;
+                        }
+                    }
+                    NavItem {
+                        text: "Audio CD";
+                        subtitle: "WAV, FLAC, MP3 to audio CD";
+                        icon: @image-url("icons/music.svg");
+                        selected: root.page == 2;
+                        clicked => {
+                            root.page = 2;
+                        }
+                    }
+                    Rectangle {
+                        height: 10px;
+                    }
+                    SectionLabel {
+                        text: "   COPY & IMAGES";
+                    }
+                    NavItem {
+                        text: "Copy Disc";
+                        subtitle: "1:1 copy of CD, DVD, Blu-ray";
+                        icon: @image-url("icons/copy.svg");
+                        selected: root.page == 3;
+                        clicked => {
+                            root.page = 3;
+                        }
+                    }
+                    NavItem {
+                        text: "Disc Images";
+                        subtitle: "Create and burn ISO, BIN/CUE";
+                        icon: @image-url("icons/layers.svg");
+                        selected: root.page == 4;
+                        clicked => {
+                            root.page = 4;
+                        }
+                    }
+                    Rectangle {
+                        height: 10px;
+                    }
+                    SectionLabel {
+                        text: "   TOOLS";
+                    }
+                    NavItem {
+                        text: "Rip Audio CD";
+                        subtitle: "Secure extraction to FLAC";
+                        icon: @image-url("icons/headphones.svg");
+                        selected: root.page == 5;
+                        clicked => {
+                            root.page = 5;
+                        }
+                    }
+                    NavItem {
+                        text: "Erase Disc";
+                        subtitle: "Blank or format rewritables";
+                        icon: @image-url("icons/eraser.svg");
+                        selected: root.page == 6;
+                        clicked => {
+                            root.page = 6;
+                        }
+                    }
+                    NavItem {
+                        text: "Drive & Disc Info";
+                        subtitle: "Capabilities, media, tracks";
+                        icon: @image-url("icons/info.svg");
+                        selected: root.page == 0;
+                        clicked => {
+                            root.page = 0;
+                        }
+                    }
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        spacing: 9px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                source: @image-url("assets/icon-64.png");
+                                width: 24px;
+                                height: 24px;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: "Bitflare " + root.app-version;
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: Theme.on-ink-2;
+                            }
+                            Text {
+                                text: "Disc Burning Suite";
+                                font-size: 10px;
+                                color: Theme.on-ink-3;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Content ──────────────────────────────────────────────────────
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.page;
+
+                if root.page == 0: VerticalLayout {
+                    padding: 28px;
+                    spacing: 18px;
+                    PageHeader {
+                        title: "Drive & Disc Info";
+                        subtitle: "Live data from the selected drive. Updates automatically when a disc is inserted or removed.";
+                        icon: @image-url("icons/info.svg");
+                    }
+                    HorizontalLayout {
+                        spacing: 18px;
+                        Card {
+                            title: "Drive";
+                            icon: @image-url("icons/drive.svg");
+                            horizontal-stretch: 1.5;
+                            VerticalLayout {
+                                alignment: start;
+                                vertical-stretch: 1;
+                                spacing: 9px;
+                                for r in root.drive-rows: KeyValue {
+                                    key: r.key;
+                                    value: r.value;
+                                }
+                            }
+                        }
+                        Card {
+                            title: "Disc";
+                            icon: @image-url("icons/disc.svg");
+                            horizontal-stretch: 1;
+                            min-width: 340px;
+                            VerticalLayout {
+                                alignment: start;
+                                vertical-stretch: 1;
+                                spacing: 9px;
+                                for r in root.disc-rows: KeyValue {
+                                    key: r.key;
+                                    value: r.value;
+                                    key-width: 110px;
+                                }
+                            }
+                        }
+                    }
+                    Table {
+                        vertical-stretch: 1;
+                        min-height: 150px;
+                        selectable: false;
+                        columns: [
+                            { title: "TRACK", stretch: 0.12 },
+                            { title: "TYPE", stretch: 0.16 },
+                            { title: "START (LBA)", stretch: 0.22 },
+                            { title: "LENGTH (SECTORS)", stretch: 0.25 },
+                            { title: "SIZE", stretch: 0.25 },
+                        ];
+                        rows: root.track-rows;
+                        empty-text: "No recorded tracks on this disc.";
+                        empty-icon: @image-url("icons/disc.svg");
+                    }
+                }
+
+                if root.page == 1: VerticalLayout {
+                    padding: 28px;
+                    spacing: 16px;
+                    HorizontalLayout {
+                        PageHeader {
+                            title: "New Data Disc";
+                            subtitle: "Build a compilation of files and folders and burn it to DVD or Blu-ray.";
+                            icon: @image-url("icons/disc.svg");
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Add Files";
+                                    icon: @image-url("icons/file-plus.svg");
+                                    enabled: !root.busy;
+                                    clicked => {
+                                        root.add-files();
+                                    }
+                                }
+                                Button {
+                                    text: "Add Folder";
+                                    icon: @image-url("icons/folder-plus.svg");
+                                    enabled: !root.busy;
+                                    clicked => {
+                                        root.add-folder();
+                                    }
+                                }
+                                Button {
+                                    text: "Remove";
+                                    icon: @image-url("icons/trash.svg");
+                                    enabled: root.data-selected >= 0 && !root.busy;
+                                    clicked => {
+                                        root.remove-selected();
+                                    }
+                                }
+                                Button {
+                                    text: "Clear";
+                                    kind: "ghost";
+                                    icon: @image-url("icons/x-circle.svg");
+                                    enabled: root.data-rows.length > 0 && !root.busy;
+                                    clicked => {
+                                        root.clear-data();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: "VOLUME LABEL";
+                                font-size: 10px;
+                                font-weight: 700;
+                                letter-spacing: 0.8px;
+                                color: Theme.text-2;
+                            }
+                            LineEdit {
+                                width: 240px;
+                                text <=> root.volume-label;
+                                placeholder: "NEW_DISC";
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: "FILE SYSTEM";
+                                font-size: 10px;
+                                font-weight: 700;
+                                letter-spacing: 0.8px;
+                                color: Theme.text-2;
+                            }
+                            ComboBox {
+                                width: 300px;
+                                model: ["UDF 2.50  (DVD & Blu-ray)"];
+                                current-index <=> root.fs-index;
+                            }
+                        }
+                    }
+                    Table {
+                        vertical-stretch: 1;
+                        columns: [
+                            { title: "NAME", stretch: 0.36 },
+                            { title: "TYPE", stretch: 0.14 },
+                            { title: "SIZE", stretch: 0.11 },
+                            { title: "LOCATION", stretch: 0.39 },
+                        ];
+                        rows: root.data-rows;
+                        current-row <=> root.data-selected;
+                        empty-text: "Add files or folders to start your compilation.";
+                        empty-icon: @image-url("icons/folder-plus.svg");
+                    }
+                    Rectangle {
+                        background: Theme.surface;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        height: footer.preferred-height;
+                        footer := HorizontalLayout {
+                            padding: 14px;
+                            spacing: 16px;
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "TARGET SIZE";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    letter-spacing: 0.8px;
+                                    color: Theme.text-2;
+                                }
+                                ComboBox {
+                                    width: 200px;
+                                    model: ["Inserted disc", "CD  (700 MB)", "DVD  (4.7 GB)", "DVD DL  (8.5 GB)", "BD  (25 GB)", "BD DL  (50 GB)"];
+                                    current-index <=> root.media-index;
+                                    selected(i) => {
+                                        root.media-changed(i);
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 7px;
+                                alignment: center;
+                                HorizontalLayout {
+                                    Text {
+                                        text: root.data-total-text + "  of  " + root.data-capacity-text;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        color: Theme.text;
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        text: root.data-fill > 0 ? round(root.data-fill * 100) + "% used" : "";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.data-over ? Theme.danger : Theme.text-2;
+                                    }
+                                }
+                                ProgressBar {
+                                    value: root.data-fill;
+                                    tone: root.data-over ? "danger" : "accent";
+                                }
+                                Text {
+                                    text: root.burn-hint;
+                                    font-size: 11px;
+                                    color: root.data-over ? Theme.danger : root.can-burn ? Theme.success : Theme.text-2;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Save as Image";
+                                        icon: @image-url("icons/save.svg");
+                                        enabled: root.data-rows.length > 0 && !root.busy;
+                                        clicked => {
+                                            root.save-image();
+                                        }
+                                    }
+                                    Button {
+                                        text: "Burn";
+                                        kind: "primary";
+                                        icon: @image-url("icons/flame.svg");
+                                        enabled: root.can-burn;
+                                        clicked => {
+                                            root.open-burn-dialog();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 2: PlannedPage {
+                    title: "Audio CD";
+                    subtitle: "Create a standard audio CD that plays in any CD player.";
+                    icon: @image-url("icons/music.svg");
+                    milestone: "the audio milestone";
+                    features: [
+                        "Add WAV, FLAC, MP3 and OGG files; they are decoded and resampled to 44.1 kHz / 16-bit stereo.",
+                        "Reorder tracks, set pauses between tracks, and see the total playing time against 74 / 80 minutes.",
+                        "Write CD-Text (album, artist, track titles) and ISRC codes.",
+                        "Disc-at-once writing for gapless albums, with optional volume normalization.",
+                    ];
+                }
+                if root.page == 3: PlannedPage {
+                    title: "Copy Disc";
+                    subtitle: "Make an exact 1:1 copy of a CD, DVD or Blu-ray.";
+                    icon: @image-url("icons/copy.svg");
+                    milestone: "the disc copy milestone";
+                    features: [
+                        "Direct drive-to-drive copy, or copy through a temporary image with a single drive.",
+                        "CDs are copied raw with subchannel data, preserving mixed-mode, CD-Extra, pregaps, ISRC and CD-Text.",
+                        "DVD and Blu-ray copies are sector-exact, including dual-layer discs with the original layer break.",
+                        "Verification after writing. Commercially encrypted discs (CSS, AACS) are detected and are not copied.",
+                    ];
+                }
+                if root.page == 4: PlannedPage {
+                    title: "Disc Images";
+                    subtitle: "Save discs to image files and burn images back to disc.";
+                    icon: @image-url("icons/layers.svg");
+                    milestone: "the disc image milestone";
+                    features: [
+                        "Create ISO images of data discs and BIN/CUE images of CDs (including audio and mixed-mode).",
+                        "Burn ISO, BIN/CUE and other supported images to CD, DVD and Blu-ray.",
+                        "Browse the contents of ISO and UDF images without mounting them.",
+                        "Checksum verification of images and of burned discs.",
+                    ];
+                }
+                if root.page == 5: PlannedPage {
+                    title: "Rip Audio CD";
+                    subtitle: "Extract audio tracks with error detection.";
+                    icon: @image-url("icons/headphones.svg");
+                    milestone: "the audio milestone";
+                    features: [
+                        "Secure mode: repeated reads and C2 error pointers to detect and correct read errors.",
+                        "Drive read-offset correction and AccurateRip verification.",
+                        "Album and track names from online metadata or CD-Text.",
+                        "Output to FLAC or WAV with tags, plus a cue sheet.",
+                    ];
+                }
+                if root.page == 6: PlannedPage {
+                    title: "Erase Disc";
+                    subtitle: "Clear rewritable media so it can be reused.";
+                    icon: @image-url("icons/eraser.svg");
+                    milestone: "the erase milestone";
+                    features: [
+                        "Quick and full erase for CD-RW and DVD-RW.",
+                        "Formatting for DVD+RW, DVD-RAM and BD-RE.",
+                        "Shows the media type and current state before erasing.",
+                    ];
+                }
+            }
+        }
+
+        // ── Status bar ───────────────────────────────────────────────────────
+        Rectangle {
+            height: 30px;
+            background: Theme.surface;
+            Rectangle {
+                y: 0;
+                height: 1px;
+                background: Theme.border;
+            }
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 8px;
+                if root.busy: VerticalLayout {
+                    alignment: center;
+                    Spinner {
+                        width: 14px;
+                        height: 14px;
+                    }
+                }
+                Text {
+                    text: root.status-text;
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    color: Theme.text-2;
+                }
+                Text {
+                    text: "Bitflare " + root.app-version;
+                    vertical-alignment: center;
+                    font-size: 11px;
+                    color: Theme.text-3;
+                }
+            }
+        }
+    }
+
+    // ── Burn dialog ──────────────────────────────────────────────────────────
+    if root.burn-dialog: Overlay {
+        Rectangle {
+            width: 580px;
+            height: burn-layout.preferred-height;
+            background: Theme.surface;
+            border-radius: 14px;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 10px;
+            drop-shadow-color: #00000066;
+            burn-layout := VerticalLayout {
+                padding: 26px;
+                spacing: 16px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 22px;
+                        background: Theme.accent-soft;
+                        Image {
+                            source: @image-url("icons/flame.svg");
+                            width: 22px;
+                            height: 22px;
+                            colorize: Theme.accent;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "Burn Data Disc";
+                            font-size: 20px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "Check the settings, then start burning.";
+                            font-size: 12px;
+                            color: Theme.text-2;
+                        }
+                    }
+                }
+                Rectangle {
+                    background: Theme.surface-2;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    height: summary.preferred-height;
+                    summary := VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+                        for r in root.burn-rows: KeyValue {
+                            key: r.key;
+                            value: r.value;
+                            key-width: 100px;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: "Write speed";
+                        width: 100px;
+                        vertical-alignment: center;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    ComboBox {
+                        model: root.burn-speeds;
+                        current-index <=> root.burn-speed-index;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    CheckBox {
+                        text: "Verify data after burning (recommended)";
+                        checked <=> root.burn-verify;
+                    }
+                    CheckBox {
+                        text: "Finalize disc (recommended — no more files can be added later)";
+                        checked <=> root.burn-finalize;
+                    }
+                }
+                Banner {
+                    tone: "warn";
+                    text: "Keep the disc in the drive and the computer awake until burning finishes. Cancelling a BD-R or DVD+R while it is being written leaves the disc unusable.";
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.burn-dialog = false;
+                        }
+                    }
+                    Button {
+                        text: "Start Burning";
+                        kind: "primary";
+                        icon: @image-url("icons/flame.svg");
+                        clicked => {
+                            root.start-burn();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Job progress window ──────────────────────────────────────────────────
+    if root.job-visible: Overlay {
+        Rectangle {
+            width: 700px;
+            height: 540px;
+            background: Theme.surface;
+            border-radius: 14px;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 10px;
+            drop-shadow-color: #00000066;
+            VerticalLayout {
+                padding: 26px;
+                spacing: 14px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    vertical-stretch: 0;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 22px;
+                        background: root.job-running ? Theme.accent-soft : root.job-ok ? Theme.success-soft : Theme.danger-soft;
+                        Image {
+                            source: root.job-running ? (root.job-is-burn ? @image-url("icons/flame.svg") : @image-url("icons/save.svg"))
+                                : root.job-ok ? @image-url("icons/check-circle.svg") : @image-url("icons/alert.svg");
+                            width: 22px;
+                            height: 22px;
+                            colorize: root.job-running ? Theme.accent : root.job-ok ? Theme.success : Theme.danger;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.job-title;
+                            font-size: 19px;
+                            font-weight: 700;
+                            overflow: elide;
+                            color: Theme.text;
+                        }
+                        HorizontalLayout {
+                            spacing: 7px;
+                            alignment: start;
+                            if root.job-running: VerticalLayout {
+                                alignment: center;
+                                Spinner {
+                                    width: 13px;
+                                    height: 13px;
+                                }
+                            }
+                            Text {
+                                text: root.job-phase;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.job-running ? Theme.accent-text : root.job-ok ? Theme.success : Theme.danger;
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+                    HorizontalLayout {
+                        Text {
+                            text: root.job-detail;
+                            font-size: 12px;
+                            color: Theme.text-2;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: round(root.job-fraction * 100) + "%";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+                    }
+                    ProgressBar {
+                        height: 12px;
+                        value: root.job-fraction;
+                        tone: root.job-running ? "accent" : root.job-ok ? "success" : "danger";
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 10px;
+                    background: Theme.ink;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 4px;
+                        alignment: end;
+                        for line in root.job-log: Text {
+                            text: line;
+                            font-size: 11px;
+                            font-family: "Consolas";
+                            wrap: word-wrap;
+                            color: Theme.on-ink-2;
+                        }
+                    }
+                }
+                if !root.job-running: Banner {
+                    tone: root.job-ok ? "success" : "danger";
+                    text: root.job-result;
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Button {
+                        text: "Copy Log";
+                        kind: "ghost";
+                        icon: @image-url("icons/copy.svg");
+                        clicked => {
+                            root.copy-log();
+                        }
+                    }
+                    Text {
+                        text: root.job-copy-feedback;
+                        vertical-alignment: center;
+                        font-size: 12px;
+                        color: Theme.success;
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    if root.job-running: Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.cancel-job();
+                        }
+                    }
+                    if !root.job-running && root.job-ok && root.job-can-eject: Button {
+                        text: "Eject Disc";
+                        icon: @image-url("icons/eject.svg");
+                        clicked => {
+                            root.eject-after-job();
+                        }
+                    }
+                    if !root.job-running: Button {
+                        text: "Close";
+                        kind: "primary";
+                        clicked => {
+                            root.close-job();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

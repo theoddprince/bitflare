@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  engine:
+    name: Engine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy -p bc-scsi -p bc-drive -p bc-fs -p bc-burn -p bc-cli --all-targets
+      - name: Test
+        run: cargo test -p bc-scsi -p bc-drive -p bc-fs -p bc-burn -p bc-cli
+
+  app:
+    name: Desktop app (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy -p bc-gui
+      - name: Build
+        run: cargo build --release -p bc-gui -p bc-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bitflare-windows-x64
+          path: |
+            target/release/bitflare.exe
+            target/release/bitflare-cli.exe
